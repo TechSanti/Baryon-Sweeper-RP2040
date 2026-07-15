@@ -18,7 +18,7 @@ const byte go_key1[] = {0xC6, 0x6E, 0x9E, 0xD6, 0xEC, 0xBC, 0xB1, 0x21, 0xB7, 0x
 const byte go_key2[] = {0xDA, 0x24, 0xDA, 0xB4, 0x3A, 0x61, 0xCB, 0xDF, 0x61, 0xFD, 0x25, 0x5D, 0x0A, 0xEA, 0x79, 0x57};
 const byte go_secret[] = {0x88, 0x0E, 0x2A, 0x94, 0x11, 0x09, 0x26, 0xB2, 0x0E, 0x53, 0xE2, 0x2A, 0xE6, 0x48, 0xAE, 0x9D};
 
-const byte keystore[][16] = {
+static const byte keystore[][16] = {
   {0x5C, 0x52, 0xD9, 0x1C, 0xF3, 0x82, 0xAC, 0xA4, 0x89, 0xD8, 0x81, 0x78, 0xEC, 0x16, 0x29, 0x7B},
   {0x9D, 0x4F, 0x50, 0xFC, 0xE1, 0xB6, 0x8E, 0x12, 0x09, 0x30, 0x7D, 0xDB, 0xA6, 0xA5, 0xB5, 0xAA},
   {0x09, 0x75, 0x98, 0x88, 0x64, 0xAC, 0xF7, 0x62, 0x1B, 0xC0, 0x90, 0x9D, 0xF0, 0xFC, 0xAB, 0xFF},
@@ -39,7 +39,7 @@ const byte keystore[][16] = {
   {0x41, 0x84, 0x99, 0xBE, 0x9D, 0x35, 0xA3, 0xB9, 0xFC, 0x6A, 0xD0, 0xD6, 0xF0, 0x41, 0xBB, 0x26}
 };
 
-const byte challenge1_secret[][8] = {
+static const byte challenge1_secret[][8] = {
   {0xD2, 0x07, 0x22, 0x53, 0xA4, 0xF2, 0x74, 0x68},
   {0xB3, 0x7A, 0x16, 0xEF, 0x55, 0x7B, 0xD0, 0x89},
   {0xA0, 0x4E, 0x32, 0xBB, 0xA7, 0x13, 0x9E, 0x46},
@@ -57,7 +57,7 @@ const byte challenge1_secret[][8] = {
   {0x0B, 0xD9, 0x02, 0x7E, 0x85, 0x1F, 0xA1, 0x23}
 };
 
-const byte challenge2_secret[][8] = {
+static const byte challenge2_secret[][8] = {
   {0xF5, 0xD7, 0xD4, 0xB5, 0x75, 0xF0, 0x8E, 0x4E},
   {0xCC, 0x69, 0x95, 0x81, 0xFD, 0x89, 0x12, 0x6C},
   {0x49, 0x5E, 0x03, 0x47, 0x94, 0x93, 0x1D, 0x7B},
@@ -75,68 +75,54 @@ const byte challenge2_secret[][8] = {
   {0xF7, 0x91, 0xED, 0x0B, 0x3F, 0x49, 0xA4, 0x48}
 };
 
+// Estrutura de lookup
+typedef struct {
+    byte key;
+    byte index;
+} KeyMap;
+
+// Tabela de mapeamento para versão vs. index
+static const KeyMap version_map[] = {
+    {0x00, 0}, {0x01, 1}, {0x02, 2}, {0x03, 3},
+    {0x04, 4}, {0x05, 5}, {0x06, 6}, {0x08, 7},
+    {0x09, 8}, {0x0A, 9}, {0x0B, 10}, {0x0C, 11},
+    {0x0D, 12}, {0x2F, 13}, {0x97, 14}, {0xB3, 15},
+    {0xD9, 16}, {0xEB, 17}
+};
+
+static int get_index_from_version(byte version) {
+    for (int i = 0; i < sizeof(version_map)/sizeof(KeyMap); i++) {
+        if (version_map[i].key == version) {
+            return version_map[i].index;
+        }
+    }
+    return -1;
+}
+
 void get_keystore(byte *buffer, byte key) {
-    switch (key) {
-        case 0:   memcpy(buffer, keystore[0], 16); break;
-        case 1:   memcpy(buffer, keystore[1], 16); break;
-        case 2:   memcpy(buffer, keystore[2], 16); break;
-        case 3:   memcpy(buffer, keystore[3], 16); break;
-        case 4:   memcpy(buffer, keystore[4], 16); break;
-        case 5:   memcpy(buffer, keystore[5], 16); break;
-        case 6:   memcpy(buffer, keystore[6], 16); break;
-        case 8:   memcpy(buffer, keystore[7], 16); break;
-        case 9:   memcpy(buffer, keystore[8], 16); break;
-        case 0x0A: memcpy(buffer, keystore[9], 16); break;
-        case 0x0B: memcpy(buffer, keystore[10], 16); break;
-        case 0x0C: memcpy(buffer, keystore[11], 16); break;
-        case 0x0D: memcpy(buffer, keystore[12], 16); break;
-        case 0x2F: memcpy(buffer, keystore[13], 16); break;
-        case 0x97: memcpy(buffer, keystore[14], 16); break;
-        case 0xB3: memcpy(buffer, keystore[15], 16); break;
-        case 0xD9: memcpy(buffer, keystore[16], 16); break;
-        case 0xEB: memcpy(buffer, keystore[17], 16); break;
-        default:   memset(buffer, 0, 16); break;
+    int idx = get_index_from_version(key);
+    if (idx != -1 && idx < sizeof(keystore)/sizeof(keystore[0])) {
+        memcpy(buffer, keystore[idx], 16);
+    } else {
+        memset(buffer, 0, 16);
     }
 }
 
 void get_challenge1_secret(byte *buffer, byte version) {
-    switch (version) {
-        case 0:   memcpy(buffer, challenge1_secret[0], 8); break;
-        case 1:   memcpy(buffer, challenge1_secret[1], 8); break;
-        case 2:   memcpy(buffer, challenge1_secret[2], 8); break;
-        case 3:   memcpy(buffer, challenge1_secret[3], 8); break;
-        case 4:   memcpy(buffer, challenge1_secret[4], 8); break;
-        case 5:   memcpy(buffer, challenge1_secret[5], 8); break;
-        case 6:   memcpy(buffer, challenge1_secret[6], 8); break;
-        case 8:   memcpy(buffer, challenge1_secret[7], 8); break;
-        case 0x0A: memcpy(buffer, challenge1_secret[8], 8); break;
-        case 0x0D: memcpy(buffer, challenge1_secret[9], 8); break;
-        case 0x2F: memcpy(buffer, challenge1_secret[10], 8); break;
-        case 0x97: memcpy(buffer, challenge1_secret[11], 8); break;
-        case 0xB3: memcpy(buffer, challenge1_secret[12], 8); break;
-        case 0xD9: memcpy(buffer, challenge1_secret[13], 8); break;
-        case 0xEB: memcpy(buffer, challenge1_secret[14], 8); break;
-        default:   memset(buffer, 0, 8); break;
+    int idx = get_index_from_version(version);
+    // Para as challenges, apenas as 15 primeiras entradas existem no array.
+    if (idx != -1 && idx < sizeof(challenge1_secret)/sizeof(challenge1_secret[0])) {
+        memcpy(buffer, challenge1_secret[idx], 8);
+    } else {
+        memset(buffer, 0, 8);
     }
 }
 
 void get_challenge2_secret(byte *buffer, byte version) {
-    switch (version) {
-        case 0:   memcpy(buffer, challenge2_secret[0], 8); break;
-        case 1:   memcpy(buffer, challenge2_secret[1], 8); break;
-        case 2:   memcpy(buffer, challenge2_secret[2], 8); break;
-        case 3:   memcpy(buffer, challenge2_secret[3], 8); break;
-        case 4:   memcpy(buffer, challenge2_secret[4], 8); break;
-        case 5:   memcpy(buffer, challenge2_secret[5], 8); break;
-        case 6:   memcpy(buffer, challenge2_secret[6], 8); break;
-        case 8:   memcpy(buffer, challenge2_secret[7], 8); break;
-        case 0x0A: memcpy(buffer, challenge2_secret[8], 8); break;
-        case 0x0D: memcpy(buffer, challenge2_secret[9], 8); break;
-        case 0x2F: memcpy(buffer, challenge2_secret[10], 8); break;
-        case 0x97: memcpy(buffer, challenge2_secret[11], 8); break;
-        case 0xB3: memcpy(buffer, challenge2_secret[12], 8); break;
-        case 0xD9: memcpy(buffer, challenge2_secret[13], 8); break;
-        case 0xEB: memcpy(buffer, challenge2_secret[14], 8); break;
-        default:   memset(buffer, 0, 8); break;
+    int idx = get_index_from_version(version);
+    if (idx != -1 && idx < sizeof(challenge2_secret)/sizeof(challenge2_secret[0])) {
+        memcpy(buffer, challenge2_secret[idx], 8);
+    } else {
+        memset(buffer, 0, 8);
     }
 }

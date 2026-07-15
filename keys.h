@@ -22,10 +22,6 @@ extern const byte go_key1[16];
 extern const byte go_key2[16];
 extern const byte go_secret[16];
 
-extern const byte keystore[][16];
-extern const byte challenge1_secret[][8];
-extern const byte challenge2_secret[][8];
-
 void get_keystore(byte *buffer, byte key);
 void get_challenge1_secret(byte *buffer, byte version);
 void get_challenge2_secret(byte *buffer, byte version);

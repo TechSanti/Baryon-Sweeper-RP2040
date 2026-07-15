@@ -8,6 +8,24 @@
 #include "aes.h"
 #include "keys.h"
 
+// Enum para comandos do SYSCON
+typedef enum {
+    CMD_INIT = 0x01,
+    CMD_READ_CODE = 0x02,
+    CMD_READ_DATA_03 = 0x03,
+    CMD_READ_DATA_04 = 0x04,
+    CMD_READ_DATA_07 = 0x07,
+    CMD_READ_DATA_08 = 0x08,
+    CMD_READ_DATA_09 = 0x09,
+    CMD_READ_DATA_0B = 0x0B,
+    CMD_READ_SERIAL = 0x0C,
+    CMD_READ_DATA_0D = 0x0D,
+    CMD_READ_DATA_16 = 0x16,
+    CMD_SYSCON_CHALLENGE = 0x80,
+    CMD_SYSCON_RESPONSE = 0x81,
+    CMD_PSP_GO_AUTH = 0x90
+} SysconCommand;
+
 // UART para o PSP (19200 8E1)
 #define UART_ID       uart0
 #define BAUD_RATE     19200
@@ -18,6 +36,9 @@
 #define TX_PIN        0
 #define RX_PIN        1
 
+// Limite do buffer de mensagem
+#define MSG_MAX_LENGTH 64
+
 // LED padrão (GPIO25) se não estiver definido USE_NEOPIXEL
 #ifndef USE_NEOPIXEL
 #define LED_PIN       25
@@ -25,7 +46,7 @@
 
 // Buffers globais
 static uint8_t serial_code[8] = {0};
-static uint8_t msg[64] = {0};
+static uint8_t msg[MSG_MAX_LENGTH] = {0};
 static uint8_t msgLength = 0;
 static uint8_t version = 0;
 static uint8_t pspdata[4] = {0};
@@ -83,7 +104,7 @@ static void setLedCommunication(bool isCommunicating) {
         ws2812_put_pixel(0xFF, 0x00, 0x00); // vermelho
     } else {
         if (ledOn)
-            ws2812_put_pixel(0x00, 0x00, 0xFF); // azul
+            ws2812_put_pixel(0x00, 0xFF, 0x00); // verde
         else
             ws2812_put_pixel(0x00, 0x00, 0x00);
     }
@@ -173,7 +194,7 @@ static void MixChallenge2(uint8_t *data, uint8_t ver, uint8_t *challenge) {
 static void generateSysconResponses(void) {
     version = msg[0];
     uint8_t tempKey[16] = {0};
-    uint8_t req[msgLength - 1];
+    uint8_t req[MSG_MAX_LENGTH] = {0};
     uint8_t data[16];
     uint8_t second[16];
 
@@ -190,8 +211,9 @@ static void generateSysconResponses(void) {
         return;
     }
 
-    for (uint8_t i = 1; i < msgLength; i++)
+    for (uint8_t i = 1; i < msgLength; i++) {
         req[i-1] = msg[i];
+    }
 
     MixChallenge1(data, version, req);
     MatrixSwap(data, 16);
@@ -201,6 +223,13 @@ static void generateSysconResponses(void) {
     MatrixSwap(challenge1b, 16);
     memcpy(tempBuffer + 3, challenge1a, 8);
     memcpy(tempBuffer + 3 + 8, challenge1b, 8);
+}
+
+// Limpar bytes residuais do buffer de UART após um timeout
+static void flush_uart_rx(void) {
+    while (uart_is_readable(UART_ID)) {
+        uart_getc(UART_ID);
+    }
 }
 
 int main(void) {
@@ -217,7 +246,7 @@ int main(void) {
 
 #ifdef USE_NEOPIXEL
     ws2812_init(16);
-    ws2812_put_pixel(0, 0, 255);
+    ws2812_put_pixel(0, 255, 0); // inicializa verde
 #else
     gpio_init(LED_PIN);
     gpio_set_dir(LED_PIN, GPIO_OUT);
@@ -253,7 +282,19 @@ int main(void) {
                 if (pspdata[1] == 0x02) {
                     msgLength = 0;
                 } else {
-                    msgLength = ((uint8_t)pspdata[1] - 2);
+                    // Prevenção de Buffer Overflow e Underflow
+                    if (pspdata[1] < 2) {
+                        msgLength = 0;
+                    } else {
+                        msgLength = ((uint8_t)pspdata[1] - 2);
+                    }
+                    
+                    if (msgLength > MSG_MAX_LENGTH) {
+                        printf("Mensagem muito longa. Ignorando.\n");
+                        flush_uart_rx();
+                        setLedCommunication(false);
+                        continue;
+                    }
 
                     absolute_time_t timeout = make_timeout_time_ms(100);
                     while (!uart_is_readable(UART_ID) && !time_reached(timeout))
@@ -261,6 +302,7 @@ int main(void) {
 
                     if (time_reached(timeout)) {
                         printf("Timeout waiting for message bytes\n");
+                        flush_uart_rx();
                         setLedCommunication(false);
                         continue;
                     }
@@ -278,19 +320,21 @@ int main(void) {
                 log_byte(pspdata[3]);
                 printf("\n");
 
-                switch (pspdata[2]) {
-                case 0x01:
+                SysconCommand cmd = (SysconCommand)pspdata[2];
+
+                switch (cmd) {
+                case CMD_INIT:
                     memcpy(tempBuffer, answer_01, sizeof(answer_01));
                     psp_write(tempBuffer, sizeof(answer_01), false);
                     break;
-                case 0x0C:
+                case CMD_READ_SERIAL:
                     psp_write(serial_code, 8, true);
                     break;
-                case 0x80:
+                case CMD_SYSCON_CHALLENGE:
                     generateSysconResponses();
                     psp_write(tempBuffer, 19, true);
                     break;
-                case 0x81:
+                case CMD_SYSCON_RESPONSE:
                     tempBuffer[0] = 0xA5;
                     tempBuffer[1] = 0x12;
                     tempBuffer[2] = 0x06;
@@ -321,7 +365,7 @@ int main(void) {
                         psp_write(tempBuffer, sizeof(answer_01), false);
                     }
                     break;
-                case 0x90:
+                case CMD_PSP_GO_AUTH:
                     {
                         uint8_t req[32], tempKey[16], payload[32], payload91[32];
                         uint8_t temp_go_secret[16], resp2[32];
@@ -350,44 +394,44 @@ int main(void) {
                         psp_write(tempBuffer, sizeof(answer_90) + 32, true);
                     }
                     break;
-                case 0x03:
+                case CMD_READ_DATA_03:
                     memcpy(tempBuffer, answer_03, sizeof(answer_03));
                     psp_write(tempBuffer, sizeof(answer_03), false);
                     break;
-                case 0x07:
+                case CMD_READ_DATA_07:
                     memcpy(tempBuffer, answer_07, sizeof(answer_07));
                     psp_write(tempBuffer, sizeof(answer_07), false);
                     break;
-                case 0x0B:
+                case CMD_READ_DATA_0B:
                     memcpy(tempBuffer, answer_0B, sizeof(answer_0B));
                     psp_write(tempBuffer, sizeof(answer_0B), false);
                     break;
-                case 0x09:
+                case CMD_READ_DATA_09:
                     memcpy(tempBuffer, answer_09, sizeof(answer_09));
                     psp_write(tempBuffer, sizeof(answer_09), false);
                     break;
-                case 0x02:
+                case CMD_READ_CODE:
                     memcpy(tempBuffer, answer_02, sizeof(answer_02));
                     psp_write(tempBuffer, sizeof(answer_02), false);
                     break;
-                case 0x04:
+                case CMD_READ_DATA_04:
                     memcpy(tempBuffer, answer_04, sizeof(answer_04));
                     psp_write(tempBuffer, sizeof(answer_04), false);
                     break;
-                case 0x16:
+                case CMD_READ_DATA_16:
                     memcpy(tempBuffer, answer_16, sizeof(answer_16));
                     psp_write(tempBuffer, sizeof(answer_16), false);
                     break;
-                case 0x0D:
+                case CMD_READ_DATA_0D:
                     memcpy(tempBuffer, answer_0D, sizeof(answer_0D));
                     psp_write(tempBuffer, sizeof(answer_0D), false);
                     break;
-                case 0x08:
+                case CMD_READ_DATA_08:
                     memcpy(tempBuffer, answer_08, sizeof(answer_08));
                     psp_write(tempBuffer, sizeof(answer_08), false);
                     break;
                 default:
-                    printf("No option selected %02X\n", pspdata[2]);
+                    printf("No option selected %02X\n", cmd);
                 }
             } else {
                 printf("\n");
