@@ -1,0 +1,30 @@
+BARYON SWEEPER RP2040 - VALIDACAO V3
+====================================
+
+Objetivo desta versão:
+- restaurar a compatibilidade do fluxo de boot do firmware original;
+- manter limites de buffer e timeout por byte;
+- evitar que eco da linha de uma via apague o estado do handshake.
+
+Correções aplicadas:
+1. FIFO UART novamente desativado por padrão.
+2. O parser ignora qualquer quantidade de bytes de eco 0xA5 até localizar 0x5A.
+3. Erros de eco/timeout não apagam automaticamente a challenge anterior.
+4. Checksum recebido é calculado, mas não bloqueia o pedido por padrão.
+5. O pacote de serial legado volta a enviar os mesmos bytes do original.
+6. O mapa legado das challenges é o padrão de compilação.
+7. Comprimentos 0x80 e 0x90 aceitam payload maior, usando os bytes necessários.
+8. A transição do PSP Go consome quatro bytes sem exigir formato presumido.
+9. Permanecem ativos: timeout por byte, limite de 64 bytes, watchdog e AES.
+
+Testes locais executados:
+- AES-128 ECB com vetor conhecido: OK.
+- Checksums das respostas fixas: OK.
+- Mapeamento legado: OK.
+- Mapeamento de referência opcional: OK.
+- Sintaxe GNU11, Pico padrão, warnings como erro: OK com stubs.
+- Sintaxe GNU11, RP2040-Zero, warnings como erro: OK com stubs.
+
+Limitação:
+- O arquivo UF2 não foi gerado neste ambiente porque o Pico SDK não está
+  instalado. A compilação final deve ser executada no computador do usuário.
